@@ -1,11 +1,11 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-import pickle
-import pandas as pd
-import numpy as np
-import uvicorn
 
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+import numpy as np
+from io import BytesIO
+from PIL import Image
+import tensorflow as tf
 
 app = FastAPI()
 
@@ -14,7 +14,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://127.0.0.1:8000",
-    "https://car-preds-price.herokuapp.com"
+    "http://3.82.235.56/predict"
 ]
 
 app.add_middleware(
@@ -25,29 +25,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-with open('pipe.pkl', 'rb') as f:
-    model = pickle.load(f)
+MODEL = tf.keras.models.load_model("models/damagedcarmodel.h5")
 
-class PriceItem(BaseModel):
-    Location:str
-    Year:int
-    Kilometers_Driven:int
-    Fuel_Type:str
-    Transmission:str
-    Owner_Type:str
-    Seats:int
-    Company:str
-    Mileage_km_per_kg:float
-    Engine_cc:float
-    Power_bhp:float
+def read_file_as_image(data) -> np.ndarray:
+    image = np.array(Image.open(BytesIO(data)))
+    return image
+@app.get("/")
+async def suc():
+    return "Successful"
 
-@app.post('/')
-async def price_endpoint(item:PriceItem):
+@app.get("/")
+async def suc():
+    return "Succesful"
 
-    df = pd.DataFrame([item.dict().values()],columns=item.dict().keys())
-    yhat = model.predict(df)
-    print(yhat)
-    return {'Predcition': np.round(float(yhat),2)}
+@app.post("/predict")
+async def predict(
+    file: UploadFile = File(...)
+):
+    img = read_file_as_image(await file.read())
+    img_resized = tf.image.resize(img, (256,256))
+    img_batch = np.expand_dims(img_resized/255, 0)
+    
+    predictions = MODEL.predict(img_batch)
 
-# if __name__ == "__main__":
-#     uvicorn.run("main:app", port=5000)
+    yhat = predictions[0][0]
+
+    if yhat>=0.5:
+        return 'Not Damaged'
+    else:
+        return 'Damaged'
+
+    
+
+if __name__ == "__main__":
+    uvicorn.run(app, host='localhost' or '0.0.0.0', port=80)
